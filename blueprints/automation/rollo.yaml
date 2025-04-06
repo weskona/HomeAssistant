@@ -1,1 +1,276 @@
+blueprint:
+  name: Rollo Gästezimmer Automatisierung (Mehrere Rollos)
+  author: weskona
+  description: >
+    Automatisiert ein oder mehrere Rollos basierend auf Sonnenaufgang, optionalem Wochentagssensor,
+    Temperatur, Sonnenstand und optionaler Wettervorhersage. Die Automatik aktiviert sich bei Hitzeschutz
+    und deaktiviert sich automatisch nach Aufhebung des Hitzeschutzes.
+  domain: automation
+  input:
+    cover_entities:
+      name: Rollo(s)
+      description: >
+        Wähle ein oder mehrere Rollos (Cover-Entitäten) aus, die automatisiert werden sollen.
+        Diese Rollos werden je nach Sonnenaufgang, Temperatur und Hitzeschutzbedingungen geöffnet oder geschlossen.
+      selector:
+        entity:
+          filter:
+            domain: cover
+          multiple: true
+    temperature_sensor:
+      name: Außentemperatur Sensor
+      description: >
+        Wähle den Sensor aus, der die aktuelle Außentemperatur misst. Dieser Sensor wird verwendet,
+        um zu bestimmen, wann der Hitzeschutz aktiviert werden soll.
+      selector:
+        entity:
+          filter:
+            domain: sensor
+            device_class: temperature
+    temperature_threshold:
+      name: Temperatur-Schwelle für Hitzeschutz (in °C)
+      description: >
+        Definiere den Temperaturwert, ab dem der Hitzeschutz aktiv werden soll. Beispielsweise wird ab 20 °C
+        das Schließen der Rollos angestoßen.
+      default: 20
+      selector:
+        number:
+          min: -30
+          max: 50
+          step: 0.1
+    workday_sensor:
+      name: Werktagssensor (optional)
+      description: >
+        Optional: Wähle einen Sensor, der angibt, ob es sich um einen Werktag handelt. 
+        So können unterschiedliche Öffnungszeiten für Werktage und Wochenenden genutzt werden.
+      default: ""
+      selector:
+        entity:
+          multiple: false
+          filter:
+            domain: binary_sensor
+    weather_entity:
+      name: Wetter-Entity (optional)
+      description: >
+        Optional: Wähle eine Wetter-Entity aus, um zusätzliche Informationen, wie z. B. die Wettervorhersage,
+        in die Steuerung einzubeziehen. Dies hilft bei der Feinabstimmung der Rollosteuerung.
+      default: ""
+      selector:
+        entity:
+          multiple: false
+          filter:
+            domain: weather
+    fensterausrichtung:
+      name: Azimuth (Fensterausrichtung)
+      description: >
+        Gib den Azimut (in Grad) der Fensterausrichtung an. Dieser Wert wird verwendet,
+        um den optimalen Sonnenstand für die Rollosteuerung zu ermitteln.
+      default: 136
+      selector:
+        number:
+          min: 0
+          max: 360
+    azimuth_offset_before:
+      name: Winkel vor Azimuth
+      description: >
+        Definiere den Winkel (in Grad), der vor dem angegebenen Azimut als Sicherheitsbereich gilt.
+        Innerhalb dieses Bereichs werden die Rollos erst dann geschlossen, wenn die Sonne diesen Bereich erreicht.
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 180
+    azimuth_offset_after:
+      name: Winkel nach Azimuth
+      description: >
+        Definiere den Winkel (in Grad) nach dem angegebenen Azimut. Dieser Offset dient als zusätzlicher
+        Sicherheitsbereich, um eine zu frühe Öffnung der Rollos zu verhindern.
+      default: 25
+      selector:
+        number:
+          min: 0
+          max: 180
+    daily_opening_time:
+      name: Werktags Öffnungszeit
+      description: >
+        Die Zeit, zu der die Rollos an Werktagen morgens automatisch geöffnet werden.
+        Diese Zeit sollte als HH:MM:SS im 24-Stunden-Format angegeben werden.
+      default: "07:00:00"
+      selector:
+        time: {}
+    non_workday_opening_time:
+      name: Nicht-Werktags Öffnungszeit
+      description: >
+        Die Zeit, zu der die Rollos an Wochenenden oder an Tagen, an denen der Werktagssensor nicht aktiv ist,
+        geöffnet werden.
+      default: "08:00:00"
+      selector:
+        time: {}
+    daily_closing_time:
+      name: Tägliche Schließzeit
+      description: >
+        Die Zeit, zu der die Rollos jeden Tag (typischerweise am Abend) geschlossen werden,
+        um den Hitzeschutz zu gewährleisten.
+      default: "22:30:00"
+      selector:
+        time: {}
+    interval_minutes:
+      name: Intervall für Hitzeschutz-Prüfung (min)
+      description: >
+        Definiert das Intervall (in Minuten), in dem die Bedingungen für den Hitzeschutz überprüft werden.
+        Beispiel: "/5" bedeutet, dass alle 5 Minuten eine Prüfung stattfindet.
+      default: "/5"
+      selector:
+        text: {}
+    automatik_sperre:
+      name: Automatik-Sperre (Input Boolean)
+      description: >
+        Wähle den Input Boolean, der den Status der Automatik-Sperre darstellt.
+        Dieser Schalter wird verwendet, um die automatische Steuerung temporär zu deaktivieren, wenn der Hitzeschutz aktiv ist.
+      selector:
+        entity:
+          filter:
+            domain: input_boolean
+variables:
+  workday_sensor_entity: !input workday_sensor
+  is_workday: >
+    {{ workday_sensor_entity == '' or states(workday_sensor_entity) == 'on' }}
+
+  workday_opening_time: !input daily_opening_time
+  non_workday_opening_time: !input non_workday_opening_time
+  daily_closing_time: !input daily_closing_time
+
+  temperature_threshold_value: !input temperature_threshold
+  temperature_sensor_entity: !input temperature_sensor
+
+  fensterausrichtung_value: !input fensterausrichtung
+  azimuth_offset_before_value: !input azimuth_offset_before
+  azimuth_offset_after_value: !input azimuth_offset_after
+
+  weather_entity_id: !input weather_entity
+  cover_entities_id: !input cover_entities
+  automatik_sperre_entity: !input automatik_sperre
+
+triggers:
+  - trigger: sun
+    event: sunrise
+    id: sunrise
+  - trigger: time
+    at: !input daily_opening_time
+    id: workday_open
+  - trigger: time
+    at: !input non_workday_opening_time
+    id: non_workday_open
+  - trigger: time
+    at: !input daily_closing_time
+    id: abend
+  - trigger: time_pattern
+    minutes: !input interval_minutes
+    id: zyklus
+
+condition:
+  - condition: template
+    value_template: >
+      {% set sunrise_time = state_attr('sun.sun', 'next_rising') %}
+      {% set workday_time = today_at(workday_opening_time) %}
+      {% set non_workday_time = today_at(non_workday_opening_time) %}
+      {% set trig = trigger.id %}
+      {% if trig in ['sunrise', 'workday_open', 'non_workday_open', 'abend'] %}
+        {% if trig == 'sunrise' and is_workday %}
+          {{ sunrise_time is not none and sunrise_time < workday_time }}
+        {% elif trig == 'workday_open' and is_workday %}
+          {{ sunrise_time is not none and sunrise_time >= workday_time }}
+        {% elif trig == 'non_workday_open' and not is_workday %}
+          true
+        {% elif trig == 'abend' %}
+          true
+        {% else %}
+          false
+        {% endif %}
+      {% else %}
+        {{ 4 <= now().month <= 9 }}
+      {% endif %}
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id in ['sunrise', 'workday_open', 'non_workday_open'] }}"
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: !input cover_entities
+
+      - conditions:
+          - condition: trigger
+            id: abend
+        sequence:
+          - action: cover.close_cover
+            target:
+              entity_id: !input cover_entities
+
+      - conditions:
+          - condition: trigger
+            id: zyklus
+          - condition: numeric_state
+            entity_id: !input temperature_sensor
+            above: !input temperature_threshold
+          - condition: template
+            value_template: >
+              {{ state_attr('sun.sun', 'azimuth') | float > (fensterausrichtung_value - azimuth_offset_before_value)
+                  and state_attr('sun.sun', 'azimuth') | float < (fensterausrichtung_value + azimuth_offset_after_value) }}
+          - condition: template
+            value_template: >
+              {{ expand(cover_entities_id) | selectattr('attributes.current_position', 'defined') | selectattr('attributes.current_position', '>', 0) | list | count > 0 }}
+          - condition: or
+            conditions:
+              - condition: template
+                value_template: >
+                  {{ weather_entity_id == '' }}
+              - condition: template
+                value_template: >
+                  {% set forecast = state_attr(weather_entity_id, 'forecast') %}
+                  {% if forecast and forecast[0] is defined and forecast[0].condition is defined %}
+                    {{ forecast[0].condition in ['sunny', 'partlycloudy'] }}
+                  {% else %}
+                    {{ states(weather_entity_id) in ['sunny', 'partlycloudy'] }}
+                  {% endif %}
+          - condition: time
+            after: !input daily_opening_time
+            before: !input daily_closing_time
+        sequence:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: !input automatik_sperre
+          - action: cover.close_cover
+            target:
+              entity_id: !input cover_entities
+
+      - conditions:
+          - condition: trigger
+            id: zyklus
+          - condition: state
+            entity_id: !input automatik_sperre
+            state: "on"
+          - condition: or
+            conditions:
+              - condition: numeric_state
+                entity_id: !input temperature_sensor
+                below: !input temperature_threshold
+              - condition: template
+                value_template: >
+                  {{ state_attr('sun.sun', 'azimuth') | float < (fensterausrichtung_value - azimuth_offset_before_value)
+                      or state_attr('sun.sun', 'azimuth') | float > (fensterausrichtung_value + azimuth_offset_after_value) }}
+          - condition: time
+            after: !input daily_opening_time
+            before: !input daily_closing_time
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: !input cover_entities
+          - action: input_boolean.turn_off
+            target:
+              entity_id: !input automatik_sperre
+
+mode: single
 
