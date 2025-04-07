@@ -1,12 +1,21 @@
 blueprint:
   name: Rollo Gästezimmer Automatisierung (Mehrere Rollos)
-  author: weskona
   description: >
     Automatisiert ein oder mehrere Rollos basierend auf Sonnenaufgang, optionalem Wochentagssensor,
     Temperatur, Sonnenstand und optionaler Wettervorhersage. Die Automatik aktiviert sich bei Hitzeschutz
     und deaktiviert sich automatisch nach Aufhebung des Hitzeschutzes.
   domain: automation
   input:
+    automatik_sperre:
+      name: Automatik-Sperre (Input Boolean)
+      description: >
+        ACHTUNG!!! Input Boolean muss manuell angelegt werden!!! 
+        Wähle den Input Boolean, der den Status der Automatik-Sperre darstellt.
+        Dieser Schalter wird verwendet, um die automatische Steuerung temporär zu deaktivieren, wenn der Hitzeschutz aktiv ist.
+      selector:
+        entity:
+          filter:
+            domain: input_boolean
     cover_entities:
       name: Rollo(s)
       description: >
@@ -122,15 +131,6 @@ blueprint:
       default: "/5"
       selector:
         text: {}
-    automatik_sperre:
-      name: Automatik-Sperre (Input Boolean)
-      description: >
-        Wähle den Input Boolean, der den Status der Automatik-Sperre darstellt.
-        Dieser Schalter wird verwendet, um die automatische Steuerung temporär zu deaktivieren, wenn der Hitzeschutz aktiv ist.
-      selector:
-        entity:
-          filter:
-            domain: input_boolean
 variables:
   workday_sensor_entity: !input workday_sensor
   is_workday: >
@@ -171,15 +171,26 @@ triggers:
 condition:
   - condition: template
     value_template: >
+      {# Konvertiere den Sonnenaufgang in einen Zeitstempel #}
       {% set sunrise_time = state_attr('sun.sun', 'next_rising') %}
-      {% set workday_time = today_at(workday_opening_time) %}
-      {% set non_workday_time = today_at(non_workday_opening_time) %}
+      {% if sunrise_time %}
+        {% set sunrise_ts = as_timestamp(sunrise_time) %}
+      {% else %}
+        {% set sunrise_ts = None %}
+      {% endif %}
+
+      {# Konvertiere die Eingabezeiten in Zeitstempel #}
+      {% set h, m, s = workday_opening_time.split(':') %}
+      {% set workday_time_ts = as_timestamp(now().replace(hour=h|int, minute=m|int, second=s|int, microsecond=0)) %}
+      {% set h2, m2, s2 = non_workday_opening_time.split(':') %}
+      {% set non_workday_time_ts = as_timestamp(now().replace(hour=h2|int, minute=m2|int, second=s2|int, microsecond=0)) %}
+
       {% set trig = trigger.id %}
       {% if trig in ['sunrise', 'workday_open', 'non_workday_open', 'abend'] %}
         {% if trig == 'sunrise' and is_workday %}
-          {{ sunrise_time is not none and sunrise_time < workday_time }}
+          {{ sunrise_ts is not none and sunrise_ts < workday_time_ts }}
         {% elif trig == 'workday_open' and is_workday %}
-          {{ sunrise_time is not none and sunrise_time >= workday_time }}
+          {{ sunrise_ts is not none and sunrise_ts >= workday_time_ts }}
         {% elif trig == 'non_workday_open' and not is_workday %}
           true
         {% elif trig == 'abend' %}
@@ -273,4 +284,3 @@ action:
               entity_id: !input automatik_sperre
 
 mode: single
-
